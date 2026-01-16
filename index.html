@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CMH4 – Email Header Editor</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
+<style>
+body { font-family: Inter, sans-serif; background:#020617; color:#e5e7eb; }
+textarea { font-family: monospace; }
+</style>
+</head>
+
+<body class="min-h-screen p-6 flex justify-center items-center">
+
+<div class="w-full max-w-7xl bg-slate-900 rounded-2xl shadow-2xl p-6 space-y-6">
+
+<header class="text-center">
+<h1 class="text-4xl font-bold text-emerald-400">CMH4 Header Editor</h1>
+<p class="text-slate-400 mt-2">Strict header editing — body preserved</p>
+</header>
+
+<div class="grid md:grid-cols-3 gap-4 bg-slate-800 p-4 rounded-xl">
+
+<div>
+<label class="flex items-center gap-2">
+<input type="checkbox" id="optFrom" checked>
+<span>Force <b>From</b></span>
+</label>
+<input id="valFrom" class="w-full mt-2 p-2 bg-slate-900 rounded"
+value="From: Recraft &lt;noreply[5LAN]@[P_FROM]&gt;">
+</div>
+
+<div>
+<label class="flex items-center gap-2">
+<input type="checkbox" id="optMsgId" checked>
+<span>Force <b>Message-ID</b></span>
+</label>
+<input id="valMsgId" class="w-full mt-2 p-2 bg-slate-900 rounded"
+value="Message-ID: &lt;23652140.99127.[EID]1761574413879@keycloak-0.keycloak-headless.prod.svc.cluster.local&gt;">
+</div>
+
+<div>
+<label class="flex items-center gap-2">
+<input type="checkbox" id="optSender" checked>
+<span>Force <b>Sender</b></span>
+</label>
+<input id="valSender" class="w-full mt-2 p-2 bg-slate-900 rounded"
+value="Sender: no-reply[KA]@[RP]">
+</div>
+
+</div>
+
+<div class="grid md:grid-cols-2 gap-6">
+
+<div>
+<h2 class="mb-2 font-semibold text-slate-300"><i class="fas fa-file-import mr-2"></i>Raw Email</h2>
+<textarea id="input" class="w-full h-[420px] bg-slate-800 border border-slate-700 rounded-xl p-4"></textarea>
+</div>
+
+<div>
+<h2 class="mb-2 font-semibold text-slate-300"><i class="fas fa-file-export mr-2"></i>Processed Email</h2>
+<textarea id="output" readonly class="w-full h-[420px] bg-black border border-slate-700 rounded-xl p-4 text-emerald-400"></textarea>
+</div>
+
+</div>
+
+<div class="flex gap-4">
+<button id="process" class="flex-1 bg-emerald-500 hover:bg-emerald-600 text-black py-3 rounded-xl font-semibold">
+<i class="fas fa-sliders-h mr-2"></i>Edit Headers
+</button>
+
+<button id="copy" class="flex-1 bg-slate-700 hover:bg-slate-600 py-3 rounded-xl font-semibold">
+<i class="fas fa-copy mr-2"></i>Copy Result
+</button>
+</div>
+
+<footer class="text-center text-xs text-slate-500">
+CMH4 © 2026 — Khouloud Ben Sellam
+</footer>
+
+</div>
+
+<script>
+function processEmail(raw) {
+
+    const allowed = [
+        "received:",
+        "x-google-smtp-source:",
+        "x-received:",
+        "date:",
+        "to:",
+        "from:",
+        "sender:",
+        "message-id:",
+        "subject:",
+        "mime-version:",
+        "content-type:",
+        "content-transfer-encoding:"
+    ];
+
+    const exactOrder = [
+        "received:",
+        "x-google-smtp-source:",
+        "x-received:",
+        "date:",
+        "to:",
+        "from:",
+        "sender:",
+        "message-id:",
+        "content-type:",
+        "content-transfer-encoding:"
+    ];
+
+    const lines = raw.split(/\r?\n/);
+    let headers = [];
+    let body = [];
+    let inHeaders = true;
+    let current = "";
+
+    for (let line of lines) {
+        if (inHeaders && line.trim() === "") {
+            inHeaders = false;
+            if (current) headers.push(current);
+            continue;
+        }
+
+        if (inHeaders) {
+            if (/^[a-z0-9-]+:/i.test(line)) {
+                if (current) headers.push(current);
+                current = line.trim();
+            } else if (/^[ \t]/.test(line)) {
+                current += " " + line.trim();
+            }
+        } else {
+            body.push(line);
+        }
+    }
+
+    if (current) headers.push(current);
+
+    headers = headers.map(h => {
+        if (h.toLowerCase().startsWith("content-transfer-encoding:")) {
+            return "Content-Transfer-Encoding: " + h.split(":").slice(1).join(":").trim();
+        }
+        return h;
+    });
+
+    headers = headers.filter(h =>
+        allowed.some(a => h.toLowerCase().startsWith(a))
+    );
+
+    headers = headers.map(h => {
+        const lower = h.toLowerCase();
+        if (lower.startsWith("to:")) return "To: [*to]";
+        if (lower.startsWith("date:")) return "Date: [DATE]";
+        return h;
+    });
+
+    let fromHeader = headers.find(h => h.toLowerCase().startsWith("from:")) || "";
+    let msgIdHeader = headers.find(h => h.toLowerCase().startsWith("message-id:")) || "";
+
+    if (fromHeader) {
+        const match = fromHeader.match(/<([^>]+)>/);
+        if (match) {
+            let email = match[1];
+            let parts = email.split("@");
+            if (parts.length === 2) {
+                email = parts[0] + "[5LAN]@[RP]";
+                fromHeader = `${fromHeader.split("<")[0].trim()} <${email}>`;
+            }
+        }
+		else {
+			const simpleMatch = fromHeader.match(/^From:\s*([^@\s]+)@([^\s]+)$/i);
+			if (simpleMatch) {
+				fromHeader = `From: ${simpleMatch[1]}[5LAN]@[RP]`;
+			}
+		}
+    }
+
+    if (msgIdHeader) {
+        const match = msgIdHeader.match(/<([^>]+)>/);
+        if (match) {
+            let id = match[1];
+            const at = id.indexOf("@");
+            if (at !== -1) {
+                id = id.slice(0, at) + "[EID]" + id.slice(at);
+                msgIdHeader = `Message-ID: <${id}>`;
+            }
+        }
+    }
+
+    headers = headers.filter(h =>
+        !h.toLowerCase().startsWith("from:") &&
+        !h.toLowerCase().startsWith("message-id:") &&
+        !h.toLowerCase().startsWith("sender:")
+    );
+
+    if (fromHeader) headers.push(fromHeader);
+    headers.push("Sender: no-reply[KA]@[RP]");
+    if (msgIdHeader) headers.push(msgIdHeader);
+	
+	const seen = new Set();
+	headers = headers.filter(h => {
+		const normalized = h.toLowerCase().replace(/\s+/g, " ").trim();
+		if (seen.has(normalized)) return false;
+		seen.add(normalized);
+		return true;
+	});
+    headers.sort((a, b) => {
+        const aKey = exactOrder.findIndex(k => a.toLowerCase().startsWith(k));
+        const bKey = exactOrder.findIndex(k => b.toLowerCase().startsWith(k));
+        if (aKey === -1 && bKey === -1) return 0;
+        if (aKey === -1) return 1;
+        if (bKey === -1) return -1;
+        return aKey - bKey;
+    });
+
+    return headers.join("\n") + "\n\n" + body.join("\n");
+}
+
+process.onclick = () => {
+    output.value = processEmail(input.value);
+};
+
+copy.onclick = () => {
+    output.select();
+    document.execCommand("copy");
+};
+</script>
+
+</body>
+</html>
